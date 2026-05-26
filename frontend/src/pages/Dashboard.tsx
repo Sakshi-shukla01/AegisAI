@@ -17,7 +17,12 @@ export default function Dashboard() {
   })
   const systems = (
     Array.isArray(systemsData) ? systemsData : (systemsData?.items ?? [])
-  ) as Array<{ risk_level: string; compliance_status: string }>
+  ) as Array<{
+    id: number
+    name: string
+    risk_level: string | null
+    compliance_status: string
+  }>
 
   const {
     data: documentsData,
