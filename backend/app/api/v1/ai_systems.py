@@ -8,6 +8,7 @@ import io
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.config import settings
 from app.models.user import User
 from app.models.ai_system import AISystem
 from app.models.audit_log import AISystemAuditLog
@@ -24,22 +25,108 @@ from app.schemas.pagination import PaginatedResponse
 router = APIRouter()
 
 
+def _read_upload_file(file: UploadFile, max_bytes: int) -> str:
+    """Read a CSV upload with a hard byte cap."""
+
+    file.file.seek(0)
+    chunks: list[bytes] = []
+    total_bytes = 0
+
+    while True:
+        chunk = file.file.read(min(1024 * 1024, max_bytes + 1 - total_bytes))
+        if not chunk:
+            break
+
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"CSV upload exceeds the maximum size of {max_bytes // (1024 * 1024)}MB."
+                ),
+            )
+
+        chunks.append(chunk)
+
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be UTF-8 encoded CSV",
+        )
+
+
+def _process_import_rows(
+    csv_reader: csv.DictReader,
+    db: Session,
+    current_user: User,
+    max_rows: int,
+) -> tuple[int, list[dict[str, object]]]:
+    """Import CSV rows up to the configured maximum."""
+
+    errors: list[dict[str, object]] = []
+    created_count = 0
+
+    for row_num, row in enumerate(csv_reader, start=2):
+        if row_num - 1 > max_rows:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"CSV upload exceeds the maximum row count of {max_rows}."
+                ),
+            )
+
+        if not any(row.values()):
+            continue
+
+        name = row.get("name", "").strip()
+        if not name:
+            errors.append({"row": row_num, "error": "name is required"})
+            continue
+
+        existing = db.query(AISystem).filter(
+            AISystem.owner_id == current_user.id,
+            AISystem.name == name
+        ).first()
+
+        if existing:
+            errors.append({"row": row_num, "error": f"duplicate name '{name}'"})
+            continue
+
+        try:
+            ai_system = AISystem(
+                owner_id=current_user.id,
+                name=name,
+                description=row.get("description", "").strip() or None,
+                version=row.get("version", "").strip() or None,
+                use_case=row.get("use_case", "").strip() or None,
+                sector=row.get("sector", "").strip() or None
+            )
+            db.add(ai_system)
+            created_count += 1
+        except Exception as e:
+            errors.append({"row": row_num, "error": str(e)})
+
+    return created_count, errors
+
+
 @router.post("/", response_model=AISystemResponse, status_code=status.HTTP_201_CREATED)
 def create_ai_system(
     system_data: AISystemCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Register a new AI system for compliance tracking.
+    """Create a new AI system for compliance tracking.
 
     Args:
-        system_data: Payload containing name, description, version,
-            use_case, and sector.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_data: AI system creation payload.
+        db: Database session used to persist the new system.
+        current_user: Authenticated user who will own the new system.
 
     Returns:
-        AISystemResponse: The newly created AI system with HTTP 201.
+        The created AI system serialized as AISystemResponse.
     """
     ai_system = AISystem(
         owner_id=current_user.id,
@@ -72,22 +159,21 @@ def list_ai_systems(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all AI systems for the current user with sorting and pagination.
+    """List the current user's AI systems with sorting and pagination.
 
     Args:
-        sort_by: Field to sort by - name, risk_level, compliance_score,
-            or created_at (default: created_at).
-        order: Sort direction - asc or desc (default: desc).
-        page: Page number, 1-indexed (default: 1).
-        limit: Number of items per page, max 100 (default: 50).
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        sort_by: Column used to sort the results.
+        order: Sort direction, ascending or descending.
+        page: Page number to return, starting at 1.
+        limit: Maximum number of systems to return per page.
+        db: Database session used to query AI systems.
+        current_user: Authenticated user whose systems are being listed.
 
     Returns:
-        PaginatedResponse[AISystemResponse]: Paginated list of AI systems.
+        PaginatedResponse containing the user's AI systems.
 
     Raises:
-        HTTPException: 400 if sort_by or order values are invalid.
+        HTTPException: If the requested sort field or order is invalid.
     """
     if sort_by not in _SORTABLE_FIELDS:
         raise HTTPException(
@@ -123,27 +209,19 @@ def bulk_import_systems(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Import multiple AI systems from an uploaded CSV file.
-
-    Expected CSV columns (header row required):
-        name, description, version, use_case, sector
+    """Import AI systems from a CSV file.
 
     Args:
-        file: Uploaded CSV file (must be UTF-8 encoded, .csv extension).
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        file: CSV upload containing AI system rows.
+        db: Database session used to create imported systems.
+        current_user: Authenticated user who will own the imported systems.
 
     Returns:
-        BulkImportResponse: Count of created systems and list of
-            per-row errors for failed imports.
+        BulkImportResponse summarizing created rows and row-level errors.
 
     Raises:
-        HTTPException: 400 if file extension is invalid, file is not
-            UTF-8 encoded, or CSV has no headers.
+        HTTPException: If the upload is not a valid UTF-8 CSV file.
     """
-    errors = []
-    created_count = 0
-
     if not file.filename or not file.filename.lower().endswith('.csv'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -151,8 +229,10 @@ def bulk_import_systems(
         )
 
     try:
-        content = file.file.read()
-        decoded_content = content.decode("utf-8")
+        decoded_content = _read_upload_file(
+            file,
+            settings.AI_SYSTEM_BULK_IMPORT_MAX_BYTES,
+        )
 
         if not decoded_content.strip():
             return BulkImportResponse(created=0, errors=[])
@@ -166,37 +246,12 @@ def bulk_import_systems(
                 detail="Invalid CSV format: No headers found"
             )
 
-        for row_num, row in enumerate(csv_reader, start=2):
-            if not any(row.values()):
-                continue
-
-            name = row.get("name", "").strip()
-            if not name:
-                errors.append({"row": row_num, "error": "name is required"})
-                continue
-
-            existing = db.query(AISystem).filter(
-                AISystem.owner_id == current_user.id,
-                AISystem.name == name
-            ).first()
-
-            if existing:
-                errors.append({"row": row_num, "error": f"duplicate name '{name}'"})
-                continue
-
-            try:
-                ai_system = AISystem(
-                    owner_id=current_user.id,
-                    name=name,
-                    description=row.get("description", "").strip() or None,
-                    version=row.get("version", "").strip() or None,
-                    use_case=row.get("use_case", "").strip() or None,
-                    sector=row.get("sector", "").strip() or None
-                )
-                db.add(ai_system)
-                created_count += 1
-            except Exception as e:
-                errors.append({"row": row_num, "error": str(e)})
+        created_count, errors = _process_import_rows(
+            csv_reader,
+            db,
+            current_user,
+            settings.AI_SYSTEM_BULK_IMPORT_MAX_ROWS,
+        )
 
         db.commit()
 
@@ -223,20 +278,18 @@ def export_ai_systems(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Export the current user's AI systems registry as a CSV file.
+    """Export the authenticated user's AI systems registry as CSV.
 
     Args:
-        risk_level: Optional filter by risk level - minimal, limited,
-            high, or unacceptable.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        risk_level: Optional risk level filter applied before export.
+        db: Database session used to query the systems.
+        current_user: Authenticated user whose systems are exported.
 
     Returns:
-        StreamingResponse: A downloadable CSV file named ai_systems.csv
-            containing all matching AI systems.
+        StreamingResponse containing the generated CSV file.
 
     Raises:
-        HTTPException: 400 if risk_level value is invalid.
+        HTTPException: If the requested risk level is invalid.
     """
     query = db.query(AISystem).filter(AISystem.owner_id == current_user.id)
 
@@ -291,23 +344,21 @@ def get_ai_system_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get paginated audit history for a specific AI system.
+    """Return paginated audit history for a specific AI system.
 
     Args:
-        system_id: The unique identifier of the AI system.
-        order: Sort direction for changed_at - asc or desc (default: desc).
-        page: Page number, 1-indexed (default: 1).
-        limit: Number of items per page, max 100 (default: 20).
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_id: ID of the AI system whose history is requested.
+        order: Sort direction for the audit log entries.
+        page: Page number to return, starting at 1.
+        limit: Maximum number of audit entries to return per page.
+        db: Database session used to query the audit log.
+        current_user: Authenticated user who must own the AI system.
 
     Returns:
-        PaginatedResponse[AISystemAuditLogResponse]: Paginated audit log
-            entries for the specified AI system.
+        PaginatedResponse containing the system's audit history.
 
     Raises:
-        HTTPException: 400 if order value is invalid.
-        HTTPException: 404 if AI system not found or not owned by user.
+        HTTPException: If the system does not exist or the order is invalid.
     """
     
     # 1. Validate sorting parameter
@@ -368,18 +419,18 @@ def get_ai_system(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve a specific AI system by ID.
+    """Return a single AI system owned by the current user.
 
     Args:
-        system_id: The unique identifier of the AI system.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_id: ID of the AI system to retrieve.
+        db: Database session used to query the system.
+        current_user: Authenticated user who must own the system.
 
     Returns:
-        AISystemResponse: The requested AI system's details.
+        The requested AI system serialized as AISystemResponse.
 
     Raises:
-        HTTPException: 404 if AI system not found or not owned by user.
+        HTTPException: If the AI system does not exist or belongs to another user.
     """
     system = (
         db.query(AISystem)
@@ -401,19 +452,19 @@ def update_ai_system(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update an existing AI system's details.
+    """Update an existing AI system.
 
     Args:
-        system_id: The unique identifier of the AI system to update.
-        system_data: Partial or full update payload for the AI system.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_id: ID of the AI system to update.
+        system_data: Partial update payload for the AI system.
+        db: Database session used to load and persist the system.
+        current_user: Authenticated user who must own the system.
 
     Returns:
-        AISystemResponse: The updated AI system.
+        The updated AI system serialized as AISystemResponse.
 
     Raises:
-        HTTPException: 404 if AI system not found or not owned by user.
+        HTTPException: If the AI system does not exist or belongs to another user.
     """
     system = (
         db.query(AISystem)
@@ -442,18 +493,18 @@ def delete_ai_system(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete an AI system permanently.
+    """Delete an AI system owned by the current user.
 
     Args:
-        system_id: The unique identifier of the AI system to delete.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_id: ID of the AI system to delete.
+        db: Database session used to locate and delete the system.
+        current_user: Authenticated user who must own the system.
 
     Returns:
-        None: HTTP 204 No Content on success.
+        None. The endpoint responds with HTTP 204 No Content.
 
     Raises:
-        HTTPException: 404 if AI system not found or not owned by user.
+        HTTPException: If the AI system does not exist or belongs to another user.
     """
     system = (
         db.query(AISystem)
@@ -480,16 +531,16 @@ def update_ai_system_status(
     """Update only the compliance status of an AI system.
 
     Args:
-        system_id: The unique identifier of the AI system.
-        payload: Request body containing the new compliance_status value.
-        db: Database session dependency.
-        current_user: The authenticated user extracted from the JWT token.
+        system_id: ID of the AI system to update.
+        payload: Compliance status update payload.
+        db: Database session used to load and persist the system.
+        current_user: Authenticated user who must own the system.
 
     Returns:
-        AISystemResponse: The updated AI system with new compliance status.
+        The updated AI system serialized as AISystemResponse.
 
     Raises:
-        HTTPException: 404 if AI system not found or not owned by user.
+        HTTPException: If the AI system does not exist or belongs to another user.
     """
     system = db.query(AISystem).filter(
         AISystem.id == system_id,
