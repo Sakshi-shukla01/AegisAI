@@ -86,6 +86,7 @@ class RiskClassificationResponse(BaseModel):
     reasons: List[str]
     requirements: List[str]
     next_steps: List[str]
+    nist_mapping: Optional[NISTMapping] = None
 
 
 class RiskAssessmentResponse(BaseModel):
@@ -122,3 +123,10 @@ class QuestionnaireRiskFactor(BaseModel):
     question: str
     article: str
     triggers_level: RiskLevel
+
+
+class NISTMapping(BaseModel):
+    primary_functions: List[str]
+    subcategories: List[str]
+    rationale: str
+    nist_risk_tier: str
