@@ -99,10 +99,12 @@ const closeButtonRef = useRef<HTMLButtonElement>(null)
   }, [isOpen])
 
 // Focus close button when opened, return focus to trigger when closed
+const hasOpenedRef = useRef(false)
 useEffect(() => {
   if (isOpen) {
+    hasOpenedRef.current = true
     closeButtonRef.current?.focus()
-  } else {
+  } else if (hasOpenedRef.current) {
     triggerRef.current?.focus()
   }
 }, [isOpen])
