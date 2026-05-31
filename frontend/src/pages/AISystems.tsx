@@ -125,6 +125,7 @@ export default function AISystems() {
           <p className="text-gray-600">Manage your AI systems for compliance tracking</p>
         </div>
         <button
+        type="button"
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
         >
@@ -140,6 +141,7 @@ export default function AISystems() {
           <input
             type="text"
             placeholder="Search AI systems..."
+            aria-label="Search AI systems"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all"
@@ -150,6 +152,7 @@ export default function AISystems() {
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <select
               value={riskFilter}
+              aria-label="Filter by risk level"
               onChange={(e) => setRiskFilter(e.target.value)}
               className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none transition-all appearance-none cursor-pointer"
             >
@@ -164,6 +167,7 @@ export default function AISystems() {
             <Bot className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <select
               value={complianceFilter}
+              aria-label="Filter by compliance status"
               onChange={(e) => setComplianceFilter(e.target.value)}
               className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none transition-all appearance-none cursor-pointer"
             >
@@ -279,15 +283,21 @@ export default function AISystems() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                    <Edit className="w-5 h-5" />
-                  </button>
                   <button
-                    onClick={() => deleteMutation.mutate(system.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+  type="button"
+  aria-label={`Edit ${system.name}`}
+  className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+>
+  <Edit className="w-5 h-5" aria-hidden="true" />
+</button>
+                  <button
+  type="button"
+  onClick={() => deleteMutation.mutate(system.id)}
+  aria-label={`Delete ${system.name}`}
+  className="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+>
+  <Trash2 className="w-5 h-5" aria-hidden="true" />
+</button>
                 </div>
               </div>
               
@@ -297,8 +307,14 @@ export default function AISystems() {
                   <span className="text-gray-600">Compliance Score</span>
                   <span className="font-medium">{system.compliance_score}%</span>
                 </div>
-                <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div
+<div
+  role="progressbar"
+  aria-valuenow={system.compliance_score}
+  aria-valuemin={0}
+  aria-valuemax={100}
+  aria-label={`Compliance score: ${system.compliance_score}%`}
+  className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden"
+>                  <div
                     className={`h-full rounded-full ${
                       system.compliance_score >= 80
                         ? 'bg-green-500'
@@ -318,10 +334,15 @@ export default function AISystems() {
       {/* Add Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Add AI System
-            </h2>
+          <div
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="add-system-title"
+  className="bg-white rounded-xl p-6 w-full max-w-md"
+>
+  <h2 id="add-system-title" className="text-lg font-semibold text-gray-900 mb-4">
+    Add AI System
+  </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">

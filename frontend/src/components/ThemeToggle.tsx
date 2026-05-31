@@ -39,9 +39,10 @@ export default function ThemeToggle() {
       onClick={() => setIsDark((d) => !d)}
       className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+aria-pressed={isDark}
+title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
-      {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+      {isDark ? <Sun className="w-5 h-5" aria-hidden="true" /> : <Moon className="w-5 h-5" aria-hidden="true" />}
     </button>
   )
 }

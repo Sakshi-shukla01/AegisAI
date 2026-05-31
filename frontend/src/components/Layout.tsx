@@ -33,8 +33,10 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
-      <div
-        className={`fixed inset-y-0 left-0 bg-white border-r border-gray-200 transition-[width] duration-200 z-40 ${
+      <nav
+  role="navigation"
+  aria-label="Main navigation"
+  className={`fixed inset-y-0 left-0 bg-white border-r border-gray-200 transition-[width] duration-200 z-40 ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
       >
@@ -50,12 +52,15 @@ export default function Layout() {
               AI Compliance
             </span>
           </div>
+        
           <button
             type="button"
             onClick={() => setIsCollapsed((prev) => !prev)}
             className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+aria-expanded={!isCollapsed}
+aria-controls="sidebar-nav"
+title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {isCollapsed ? (
               <ChevronRight className="w-5 h-5" />
@@ -66,14 +71,15 @@ export default function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex flex-col gap-1 p-4">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.href
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                title={item.name}
+       <ul id="sidebar-nav" role="list" className="flex flex-col gap-1 p-4">
+  {navigation.map((item) => {
+    const isActive = location.pathname === item.href
+    return (
+      <li key={item.name}>
+      <Link
+        to={item.href}
+        aria-current={isActive ? 'page' : undefined}
+        title={item.name}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                   isActive
                     ? 'bg-primary-50 text-primary-700'
@@ -85,10 +91,10 @@ export default function Layout() {
                   {item.name}
                 </span>
               </Link>
+       </li>
             )
           })}
-        </nav>
-
+        </ul>
         {/* User section */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
           <div
@@ -106,6 +112,7 @@ export default function Layout() {
             </div>
             <div className="flex items-center gap-1">
               <button
+               type="button"
                 onClick={logout}
                 className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-300"
                 aria-label="Log out"
@@ -116,7 +123,7 @@ export default function Layout() {
             </div>
           </div>
         </div>
-      </div>
+      </nav>
 
       {/* Main content area (right of sidebar) */}
       <div
