@@ -162,7 +162,10 @@ aria-label="Notifications panel"
           <button
              ref={closeButtonRef}
             type="button"
-            onClick={() => setIsOpen(false)}
+            onClick={() => {
+  setIsOpen(false)
+  triggerRef.current?.focus()
+}}
             className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"
             aria-label="Close notifications"
           >
@@ -186,7 +189,7 @@ aria-label="Notifications panel"
                 className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:bg-gray-50 ${
                   !notification.is_read ? 'bg-primary-50/40' : ''
                 }`}
-                role="menuitem"
+               
               >
 
                 <div
